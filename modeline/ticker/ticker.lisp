@@ -28,6 +28,12 @@
   (values-average 0.0) ; average last 3 hours values
   (prev-time 0))       ; store last update time
 
+(defparameter *debug-level* 0
+  "Package debug level. StumpWM will write in its defined log.")
+
+;; To debug launch tail -f ~/.stumpwm/stumpwm.log
+;; (do () (my-stop) (stumpwm:dformat *debug-level* "--tick--~%")(sleep 1))
+
 (defparameter *tickers* ()
   "List of tickers to show.")
 
@@ -61,45 +67,75 @@
 (defparameter *url* "https://api.kraken.com/0/public/Ticker?pair="
   "Location of price provider, the ticker pair will be concatenated.")
 
+;; (defun get-values-from-url-test (tick)
+;;   "Return the actual, 24h low and 24h high values from the `*url*' API."
+;;   (stumpwm:dformat *debug-level* "get-values-from-url ENTERING: ~A~%" (ticker-pair tick))
+;;   (let* ((url (concatenate 'string *url* (ticker-pair tick)))
+;;          (response ()))
+;;     (stumpwm:dformat *debug-level* "get-values-from-url INTO LET: ~A~%" (ticker-pair tick))
+;;     (stumpwm:dformat *debug-level* "get-values-from-url 1: ~A ~A~%" (ticker-pair tick) response)
+;;     (setf response (ignore-errors
+;;                        (dexador:get url :keep-alive nil)))
+;;     (stumpwm:dformat *debug-level* "get-values-from-url 2: ~A ~A~%" (ticker-pair tick) response)
+;;     (if response
+;;         (progn
+;;           (setf response (yason:parse response))
+;;           (stumpwm:dformat *debug-level* "get-values-from-url 3: ~A ~A~%" (ticker-pair tick) response)
+;;           (setf response (gethash "result" response))
+;;           (stumpwm:dformat *debug-level* "get-values-from-url 4: ~A ~A~%" (ticker-pair tick) response)
+;;           (setf response (gethash (ticker-pair tick) response))
+;;           (stumpwm:dformat *debug-level* "get-values-from-url 5: ~A ~A~%" (ticker-pair tick) response)
+;;           (list (read-from-string (first (gethash "c" response)))
+;;                 (read-from-string (second (gethash "l" response)))
+;;                 (read-from-string (second (gethash "h" response)))))
+;;         (list nil nil nil))))
+
 (defun get-values-from-url (tick)
-  "Get the actual, 24h low and 24h high values from the `*url*' API."
+  "Return the actual, 24h low and 24h high values from the `*url*' API."
+  (stumpwm:dformat *debug-level* "get-values-from-url ENTERING: ~A~%" (ticker-pair tick))
   (let* ((url (concatenate 'string *url* (ticker-pair tick)))
          (response (handler-case
                        (gethash (ticker-pair tick)
                                 (gethash "result"
                                          (yason:parse
                                           (dexador:get url
-                                                       :keep-alive nil))))
+                                                       :keep-alive nil
+                                                       :connect-timeout 2))))
                      ;; Return NIL in case some condition is triggered
                      (condition () nil))))
-    (unless (null response)
-      (list (read-from-string (first (gethash "c" response)))
-            (read-from-string (second (gethash "l" response)))
-            (read-from-string (second (gethash "h" response)))))))
+    (stumpwm:dformat *debug-level* "get-values-from-url GOT: ~A ~A~%" (ticker-pair tick) response)
+    (if response
+        (list (read-from-string (first (gethash "c" response)))
+              (read-from-string (second (gethash "l" response)))
+              (read-from-string (second (gethash "h" response))))
+        (list nil nil nil))))
 
 (defun refresh-values (tick)
   "Refresh values from `*url*' if the `:delay' has been reached.
 Get the actual `:pair' value, store value in list, preserve list size
-popping first value, and calculate average."
-  (let ((now (/ (get-internal-real-time) internal-time-units-per-second))
-        (values (get-values-from-url tick)))
+popping first value, and calculate average.  Modifies the `*tickers*'
+ticker, returns NIL."
+  (let ((now (/ (get-internal-real-time) internal-time-units-per-second)))
     (when (> (- now (ticker-prev-time tick)) (ticker-delay tick))
+      (stumpwm:dformat *debug-level* "refresh-values ENTERING: ~A~%" (ticker-pair tick))
       (progn
-        (setf (ticker-prev-time tick) now
-              (ticker-value tick) (first values)
-              (ticker-values-low tick) (second values)
-              (ticker-values-high tick) (third values))
-        ;; Add value to values list, pushing to front
-        (push (ticker-value tick) (ticker-values tick))
-        ;; Preserve values list size, popping from end
-        (setf (ticker-values tick) (nreverse (ticker-values tick)))
-        (pop (ticker-values tick))
-        (setf (ticker-values tick) (nreverse (ticker-values tick)))
-        ;; Calculate average of values, excluding NIL values
-        ;; that could exist because network issues.
-        (let ((values-clean (remove-if-not #'numberp (ticker-values tick))))
-          (setf (ticker-values-average tick) (/ (reduce #'+ values-clean)
-                                                (max 1 (length values-clean)))))))))
+        (let ((values (get-values-from-url tick)))
+          (stumpwm:dformat *debug-level* "refresh-values GOT: ~A ~A~%" (ticker-pair tick) values)
+          (setf (ticker-prev-time tick) now
+                (ticker-value tick) (first values)
+                (ticker-values-low tick) (second values)
+                (ticker-values-high tick) (third values))
+          ;; Add value to values list, pushing to front
+          (push (ticker-value tick) (ticker-values tick))
+          ;; Preserve values list size, popping from end
+          (setf (ticker-values tick) (nreverse (ticker-values tick)))
+          (pop (ticker-values tick))
+          (setf (ticker-values tick) (nreverse (ticker-values tick)))
+          ;; Calculate average of values, excluding NIL values
+          ;; that could exist because network issues.
+          (let ((values-clean (remove-if-not #'numberp (ticker-values tick))))
+            (setf (ticker-values-average tick) (/ (reduce #'+ values-clean)
+                                                  (max 1 (length values-clean))))))))))
 
 ;;; Write on modeline
 
@@ -169,27 +205,34 @@ parameter."
         (dolist (tick *tickers*)
           (refresh-values tick)
           ;; Actual value must be positive number
+          (stumpwm:dformat *debug-level* "ticker-modeline IF: ~A ~A~%" (ticker-pair tick) (ticker-value tick))                
           (if (and (numberp (ticker-value tick)) (plusp (ticker-value tick)))
-              ;; Apply desired format to value
-              (let ((value-string (get-value-string tick)))
-                ;; Return with color if desired
-                (push (if (ticker-colors tick)
-                          (let* ((diff (- (ticker-value tick) (ticker-values-average tick)))
-                                 (pdiff (/ diff (max 1 (ticker-value tick)))))
-                            (cond ((> pdiff (ticker-threshold tick))
-                                   (format nil "^[^B^3*~A^]" value-string))
-                                  ((< pdiff (- (ticker-threshold tick)))
-                                   (format nil "^[^1*~A^]" value-string))
-                                  (t (format nil "^[^7*~A^]" value-string))))
-                          (format nil "^[^**~A^]" value-string))
-                      results))
+              (progn
+                (stumpwm:dformat *debug-level* "ticker-modeline THEN: ~A ~A~%" (ticker-pair tick) (ticker-value tick))                
+                ;; Apply desired format to value
+                (let ((value-string (get-value-string tick)))
+                  ;; Return with color if desired
+                  (push (if (ticker-colors tick)
+                            (let* ((diff (- (ticker-value tick) (ticker-values-average tick)))
+                                   (pdiff (/ diff (max 1 (ticker-value tick)))))
+                              (cond ((> pdiff (ticker-threshold tick))
+                                     (format nil "^[^B^3*~A^]" value-string))
+                                    ((< pdiff (- (ticker-threshold tick)))
+                                     (format nil "^[^1*~A^]" value-string))
+                                    (t (format nil "^[^7*~A^]" value-string))))
+                            (format nil "^[^**~A^]" value-string))
+                        results)))
               ;; The value is not a positive number
-            (format nil "-~A-" (ticker-pair tick))))
+              (progn
+                (stumpwm:dformat *debug-level* "ticker-modeline ELSE: ~A ~A~%" (ticker-pair tick) (ticker-value tick))
+                (push (format nil "-~A-" (ticker-pair tick))
+                      results))))
         ;; Return aggregated results with proper separator
         (let ((s (concatenate 'string "~{~A~^" *tickers-separator* "~}")))
+          (stumpwm:dformat *debug-level* "ticker-modeline RESULTS: ~A~%" results)                
           (format nil s (nreverse results))))
-    ;; There are no tickers defined
-    "-Ticker-"))
+      ;; There are no tickers defined
+      "-Ticker-"))
 
 ;; Bind modeline formatter character to the drawer function
 (stumpwm:add-screen-mode-line-formatter #\T 'ticker-modeline)
