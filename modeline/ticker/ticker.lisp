@@ -32,8 +32,8 @@
 (defparameter *debug-level* 0
   "Package debug level. stumpwm:dformat will write in its defined output.")
 ;; Launch a clock with some ticks
-(defparameter tick-stop nil)
-(do () (tick-stop) (stumpwm:dformat *debug-level* "--tick--~%")(sleep 5))
+;;(defparameter tick-stop nil)
+;;(do () (tick-stop) (stumpwm:dformat *debug-level* "--tick--~%")(sleep 5))
 
 ;;; Exported
 
@@ -134,15 +134,14 @@ values from API, then the ticker name is printed."
   (if *tickers*
       (let ((results ()))
         (dolist (tick *tickers*)
-          (stumpwm:dformat *debug-level* " API IN: ~A ~A --------------------~%" (ticker-pair tick) (ticker-value tick))
+          (stumpwm:dformat *debug-level* "API IN : ~A ~A --------------------~%" (ticker-pair tick) (ticker-value tick))
           ;; Get new values only if the delay interval has been reached
           (let ((now (/ (get-internal-real-time) internal-time-units-per-second)))
             (when (> (- now (ticker-prev-time tick)) (ticker-delay tick))
               (stumpwm:dformat *debug-level* "CALLING: ~A~%" (ticker-pair tick))
-              (let ((values ()))
-                ;; Store actual, 24h low, and 24h high values from the `*url*' API.
-                ;; If there is no response, store just `nil' values.
-                (setf values
+              ;; Store actual, 24h low, and 24h high values from the `*url*' API.
+              ;; If there is no response, store just `nil' values.
+              (let ((values
                       (let* ((url (concatenate 'string *url* (ticker-pair tick)))
                              (response (handler-case
                                            (gethash (ticker-pair tick)
@@ -153,16 +152,15 @@ values from API, then the ticker name is printed."
                                                                            :connect-timeout 2))))
                                          ;; Return NIL in case some condition is triggered
                                          (condition () nil))))
-                        (stumpwm:dformat *debug-level* "  GOT 1: ~A ~A~%" (ticker-pair tick) response)
+                        (stumpwm:dformat *debug-level* "GOT 1  : ~A ~A~%" (ticker-pair tick) response)
                         (if response
                             (list (read-from-string (first (gethash "c" response)))
                                   (read-from-string (second (gethash "l" response)))
                                   (read-from-string (second (gethash "h" response))))
-                            (list nil nil nil))))
-
+                            (list nil nil nil)))))
+                (stumpwm:dformat *debug-level* "GOT 2  : ~A ~A~%" (ticker-pair tick) values)
                 ;; From actual, 24 low, and 24h high, calculate average and
                 ;; store all in the `*tickers*' ticker.
-                (stumpwm:dformat *debug-level* "  GOT 2: ~A ~A~%" (ticker-pair tick) values)
                 (setf (ticker-prev-time tick) now
                       (ticker-value tick) (first values)
                       (ticker-values-low tick) (second values)
