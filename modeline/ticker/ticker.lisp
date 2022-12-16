@@ -32,8 +32,8 @@
 (defparameter *debug-level* 0
   "Package debug level. stumpwm:dformat will write in its defined output.")
 ;; Launch a clock with some ticks
-;;(defparameter tick-stop nil)
-;;(do () (tick-stop) (stumpwm:dformat *debug-level* "--tick--~%")(sleep 5))
+(defparameter tick-stop nil)
+(do () (tick-stop) (stumpwm:dformat *debug-level* "--tick--~%")(sleep 5))
 
 ;;; Exported
 
@@ -67,6 +67,9 @@
 
 (defparameter *url* "https://api.kraken.com/0/public/Ticker?pair="
   "Location of price provider, the ticker pair will be concatenated.")
+
+(defparameter *curl-command* "curl --max-time 2 --silent --fail "
+  "Shell command to get the API response.")
 
 ;;; Write on modeline
 
@@ -142,16 +145,19 @@ values from API, then the ticker name is printed."
               ;; Store actual, 24h low, and 24h high values from the `*url*' API.
               ;; If there is no response, store just `nil' values.
               (let ((values
-                      (let* ((url (concatenate 'string *url* (ticker-pair tick)))
-                             (response (handler-case
+                      (let* ((curl-response (handler-case
+                                                (stumpwm:run-shell-command
+                                                 (concatenate 'string
+                                                              *curl-command*
+                                                              *url* (ticker-pair tick))
+                                                 :collect-output-p)
+                                              (condition () "")))
+                             (response (if (< 0 (length curl-response))
                                            (gethash (ticker-pair tick)
                                                     (gethash "result"
                                                              (yason:parse
-                                                              (dexador:get url
-                                                                           :keep-alive nil
-                                                                           :connect-timeout 2))))
-                                         ;; Return NIL in case some condition is triggered
-                                         (condition () nil))))
+                                                              curl-response)))
+                                           nil)))
                         (stumpwm:dformat *debug-level* "GOT 1  : ~A ~A~%" (ticker-pair tick) response)
                         (if response
                             (list (read-from-string (first (gethash "c" response)))
@@ -176,9 +182,10 @@ values from API, then the ticker name is printed."
                 (let ((values-clean (remove-if-not #'numberp (ticker-values tick))))
                   (setf (ticker-values-average tick) (/ (reduce #'+ values-clean)
                                                         (max 1 (length values-clean))))))))
-          (stumpwm:dformat *debug-level* "API OUT: ~A ~A~%" (ticker-pair tick) (ticker-value tick))                
+          (stumpwm:dformat *debug-level* "API OUT: ~A ~A~%" (ticker-pair tick) (ticker-value tick))
+          ;; Print values as modeline requested
           (if (and (numberp (ticker-value tick)) (plusp (ticker-value tick)))
-              ;; Actual value is a positive number, so print off
+              ;; The value is a positive number, so print off
               (let ((value-string (get-value-string tick)))
                 ;; Return with color if desired
                 (push (if (ticker-colors tick)
@@ -193,7 +200,7 @@ values from API, then the ticker name is printed."
                       results))
               ;; The value is not a positive number, set the tick name as response
               (push (format nil "-~A-" (ticker-pair tick)) results)))
-        ;; Return aggregated ticks results with proper separator
+        ;; Return aggregated ticks results for all *tickers*, with proper separator
         (let ((s (concatenate 'string "~{~A~^" *tickers-separator* "~}")))
           (stumpwm:dformat *debug-level* "RESULTS: ~A~%" results)                
           (format nil s (nreverse results))))
