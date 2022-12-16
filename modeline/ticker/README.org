@@ -8,10 +8,11 @@ servers.
 
 ** Dependencies
 
-It gets actual price through API, so needs =dexador= and =yason=.
+It gets actual price through API, so needs the Common Lisp =yason=
+package and the =curl= command in the system.
 
 #+BEGIN_SRC lisp
-  (ql:quickload '("dexador" "yason"))
+  (ql:quickload '("yason"))
 #+END_SRC
 
 ** Usage
@@ -129,8 +130,9 @@ interpreted by the =format= function:
 
 ** Issues
 
-Try to use conditions' =handler-case= machinery to avoid the internet
-timeouts or the computer sleeping process, to stuck the modeline.
+Try to use conditions' =handler-case= machinery to avoid to stuck the
+modeline by non standard =curl= responses, connection timeouts, or the
+computer sleeping process locking the internet connection.
 
 The =truncate= function is used when formatting the values, so some
 precission loss is expected.
