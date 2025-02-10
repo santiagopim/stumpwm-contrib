@@ -1,4 +1,4 @@
-;;;; bitcoin.asd
+;;;; ticker.asd
 
 (asdf:defsystem "ticker"
   :description "Display ticker price on StumpWM modeline."
